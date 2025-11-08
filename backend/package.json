@@ -1,0 +1,22 @@
+{
+  "name": "pharmaintel-ai-enhanced",
+  "version": "1.1.0",
+  "description": "Enhanced PharmaIntel AI Portal with live connectors (ClinicalTrials.gov, PubMed, PubChem, OpenAlex, USPTO) and assets",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "nodemon backend/server.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^7.5.0",
+    "pdfkit": "^0.13.0",
+    "node-fetch": "^2.6.7",
+    "node-cache": "^5.1.2"
+  }
+}
