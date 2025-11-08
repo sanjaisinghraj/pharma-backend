@@ -7,6 +7,17 @@ const authRoutes = require('./routes/authRoutes');
 const queryRoutes = require('./routes/queryRoutes');
 
 const app = express();
+const cors = require('cors');
+
+const allowedOrigins = [
+  'https://your-solution.space'
+];
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
+
 app.use(cors());
 app.use(bodyParser.json());
 
