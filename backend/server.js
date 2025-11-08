@@ -7,7 +7,6 @@ const authRoutes = require('./routes/authRoutes');
 const queryRoutes = require('./routes/queryRoutes');
 
 const app = express();
-const cors = require('cors');
 
 const allowedOrigins = [
   'https://your-solution.space'
