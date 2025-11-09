@@ -1,22 +1,9 @@
-const express = require('express');
-const router = express.Router();
-const queryController = require('../controllers/queryController');
-const jwt = require('jsonwebtoken');
+// backend/routes/queryRoutes.js
+const router = require("express").Router();
+const auth = require("../middleware/auth");
+const ctrl = require("../controllers/queryController");
 
-function authMiddleware(req,res,next){
-    const header = req.headers['authorization'];
-    if(!header) return res.status(401).json({error: 'no token'});
-    const token = header.split(' ')[1];
-    try{
-        const payload = jwt.verify(token, process.env.JWT_SECRET || 'change_this_secret');
-        req.user = payload;
-        next();
-    }catch(e){
-        return res.status(401).json({error: 'invalid token'});
-    }
-}
-
-router.post('/run', authMiddleware, queryController.runQuery);
-router.get('/history', authMiddleware, queryController.history);
+router.post("/run", auth, ctrl.run);
+router.get("/history", auth, ctrl.history);
 
 module.exports = router;
