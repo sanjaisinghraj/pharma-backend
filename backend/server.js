@@ -72,8 +72,8 @@ app.get("/api/health", (req, res) => {
 const authRoutes = require("./routes/authRoutes");
 app.use("/api/auth", authRoutes);
 
-const moleculeRoutes = require("./routes/moleculeRoutes");
-app.use("/api/molecule", moleculeRoutes);
+//const moleculeRoutes = require("./routes/moleculeRoutes");
+//app.use("/api/molecule", moleculeRoutes);
 
 // Add more routes as needed...
 
