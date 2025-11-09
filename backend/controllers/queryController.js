@@ -5,80 +5,87 @@ const {
   fetchPubMed,
   fetchPubChem,
   fetchOpenAlex,
-  fetchUSPatents
+  fetchUSPatents,
 } = require("../utils/liveConnectors");
 const { generatePDFSummary } = require("../utils/reportGenerator");
 
-/**
- * Normalize agent list (checkbox values come as strings)
- */
-function normalizeAgents(arr = []) {
-  return (arr || []).map(a => String(a).toLowerCase());
-}
-
 exports.run = async (req, res) => {
   try {
-    const prompt = (req.body?.prompt || "").trim();
-    let agents = normalizeAgents(req.body?.agents);
-
+    const { prompt, agents = [] } = req.body || {};
     if (!prompt) return res.status(400).json({ error: "Prompt is required" });
-    if (!agents.length) {
-      // default – run the “big 5”
-      agents = ["clinical", "patent", "pubmed", "pubchem", "openalex"];
-    }
 
-    // Build tasks based on selected agents
-    const tasks = {};
-    if (agents.includes("clinical")) tasks.clinical = fetchClinicalTrials(prompt);
-    if (agents.includes("pubmed"))  tasks.pubmed  = fetchPubMed(prompt);
-    if (agents.includes("pubchem")) tasks.pubchem = fetchPubChem(prompt);
-    if (agents.includes("openalex"))tasks.openalex= fetchOpenAlex(prompt);
-    if (agents.includes("patent"))  tasks.patent  = fetchUSPatents(prompt); // placeholder note inside
+    // ---- live connectors (best-effort; each wrapped) -----------------
+    const want = (k) => agents.includes(k);
 
-    // Run all selected connectors in parallel
-    const results = {};
-    const entries  = Object.entries(tasks);
-    await Promise.all(
-      entries.map(async ([key, p]) => {
-        try {
-          results[key] = await p;
-        } catch (e) {
-          results[key] = { error: e?.message || String(e) };
-        }
-      })
-    );
-
-    // Build a concise summary + highlights (you can tune this)
+    const raw = {};
     const highlights = [];
 
-    // ClinicalTrials.gov v2 returns a study count inside the payload (structure can vary)
-    if (results.clinical) {
-      const count = results.clinical?.totalCount || results.clinical?.studies?.length || 0;
-      highlights.push(`Clinical trials found: ${count}`);
+    // Clinical
+    if (want("clinical")) {
+      try {
+        const ct = await fetchClinicalTrials(prompt, 1);
+        raw.clinical = ct;
+        const n =
+          (ct?.studies?.length) ||
+          (ct?.meta?.found) ||
+          (ct?.meta?.count) ||
+          0;
+        highlights.push(`Clinical trials found: ${n}`);
+      } catch (e) {
+        raw.clinical = { error: e.message || String(e) };
+        highlights.push("Clinical: error fetching.");
+      }
     }
 
-    // PubMed: we returned {count, papers: xmlObject} – just show the count
-    if (results.pubmed) {
-      const count = results.pubmed?.count || 0;
-      highlights.push(`PubMed hits: ${count}`);
+    // PubMed
+    if (want("pubmed")) {
+      try {
+        const pm = await fetchPubMed(prompt);
+        raw.pubmed = pm;
+        const n = (pm?.papers && pm.papers.length) || pm?.count || 0;
+        highlights.push(`PubMed hits: ${n}`);
+      } catch (e) {
+        raw.pubmed = { error: e.message || String(e) };
+        highlights.push("PubMed: error fetching.");
+      }
     }
 
-    // PubChem: we returned {cids: [...], description: ...}
-    if (results.pubchem) {
-      const n = Array.isArray(results.pubchem?.cids) ? results.pubchem.cids.length : 0;
-      highlights.push(`PubChem CIDs resolved: ${n}`);
+    // PubChem
+    if (want("pubchem")) {
+      try {
+        const pc = await fetchPubChem(prompt);
+        raw.pubchem = pc;
+        const n = (pc?.cids && pc.cids.length) || 0;
+        highlights.push(`PubChem CIDs resolved: ${n}`);
+      } catch (e) {
+        raw.pubchem = { error: e.message || String(e) };
+        highlights.push("PubChem: error fetching.");
+      }
     }
 
-    // OpenAlex: show the number of works returned
-    if (results.openalex) {
-      const n =
-        (Array.isArray(results.openalex?.results) && results.openalex.results.length) ||
-        results.openalex?.meta?.count || 0;
-      highlights.push(`OpenAlex works: ${n}`);
+    // OpenAlex
+    if (want("openalex")) {
+      try {
+        const oa = await fetchOpenAlex(prompt);
+        raw.openalex = oa;
+        const n = oa?.meta?.count || (oa?.results?.length ?? 0);
+        highlights.push(`OpenAlex works: ${n}`);
+      } catch (e) {
+        raw.openalex = { error: e.message || String(e) };
+        highlights.push("OpenAlex: error fetching.");
+      }
     }
 
-    if (results.patent) {
-      highlights.push(`Patent data: ${results.patent.note || "Retrieved"}`);
+    // Patent (placeholder)
+    if (want("patent")) {
+      try {
+        const pt = await fetchUSPatents(prompt);
+        raw.patent = pt;
+        if (pt.note) highlights.push(`Patent data: ${pt.note}`);
+      } catch (e) {
+        raw.patent = { error: e.message || String(e) };
+        highlights.push("Patents: error fetching.");
+      }
     }
 
     const summary = {
@@ -86,30 +93,30 @@ exports.run = async (req, res) => {
       prompt,
       agents,
       highlights,
-      raw: results
+      raw,
     };
 
-    // Save in DB
-    const saved = await Query.create({
+    // Save query
+    const q = await Query.create({
       user: req.user.id,
       prompt,
       agents,
-      summary
+      summary,
+      pdfPath: "",
     });
 
-    // OPTIONAL: generate PDF (comment out if you don't want a PDF each time)
+    // Generate PDF and update record
     let pdfPath = "";
     try {
-      pdfPath = await generatePDFSummary(summary, saved._id);
-      saved.pdfPath = pdfPath;
-      await saved.save();
+      pdfPath = await generatePDFSummary(summary, q._id.toString());
+      q.pdfPath = pdfPath;
+      await q.save();
     } catch (e) {
-      // PDF generation failure shouldn't fail the whole request
-      console.warn("PDF generation failed:", e.message || e);
+      // PDF errors should not break the response
+      pdfPath = "";
     }
 
     res.json({ ok: true, summary, pdfPath });
-
   } catch (err) {
     console.error("Run error:", err);
     res.status(500).json({ error: "Server error" });
@@ -120,8 +127,19 @@ exports.history = async (req, res) => {
   try {
     const items = await Query.find({ user: req.user.id })
       .sort({ createdAt: -1 })
-      .limit(50);
-    res.json({ items });
+      .limit(100)
+      .lean();
+
+    // Keep it light for the list
+    const trimmed = items.map((x) => ({
+      _id: x._id,
+      prompt: x.prompt,
+      createdAt: x.createdAt,
+      highlights: x.summary?.highlights || [],
+      pdfPath: x.pdfPath || "",
+    }));
+
+    res.json({ items: trimmed });
   } catch (err) {
     console.error("History error:", err);
     res.status(500).json({ error: "Server error" });
