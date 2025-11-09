@@ -1,45 +1,38 @@
 // backend/utils/gptAgent.js
-// GROQ version (no OpenAI)
-
-const Groq = require("groq-sdk");
+// Uses Groq if GROQ_API_KEY is set; otherwise returns a safe mock.
 
 let groq = null;
 const useGroq = !!process.env.GROQ_API_KEY;
 
 if (useGroq) {
-  groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-} else {
-  console.warn("⚠️ GROQ_API_KEY missing. Falling back to mock responses.");
+  try {
+    const { Groq } = require("groq-sdk");
+    groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  } catch (e) {
+    console.warn("Groq SDK not installed/loaded, falling back to mock.");
+  }
 }
 
 module.exports = async function gptAgent({ message, system, user }) {
-
-  // ✅ Mock fallback
+  // Fallback mock if no key/Groq
   if (!groq) {
     return [
-      "🧪 Mock AI reply (no GROQ_API_KEY detected).",
+      "🧪 Mock AI reply (no GROQ_API_KEY).",
       `You said: "${message}"`,
-      "Add GROQ_API_KEY in Render to activate live LLaMA-3."
+      "Add GROQ_API_KEY on Render to call Llama-3.1 via Groq.",
     ].join("\n");
   }
 
-  const sysPrompt = system || "You are a pharma and biotech research assistant.";
+  const sys = system || "You are a pharma innovation research assistant. Be concise and factual.";
 
-  const usr = user ? ` (user: ${user.email || user.id})` : "";
+  const completion = await groq.chat.completions.create({
+    model: process.env.GROQ_MODEL || "llama-3.1-70b-versatile",
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: message }
+    ],
+    temperature: 0.2
+  });
 
-  try {
-    const completion = await groq.chat.completions.create({
-      model: "llama3-8b-8192",
-      messages: [
-        { role: "system", content: sysPrompt },
-        { role: "user", content: `${message}${usr}` }
-      ],
-      temperature: 0.2
-    });
-
-    return completion.choices?.[0]?.message?.content || "No response.";
-  } catch (err) {
-    console.error("Groq API error:", err);
-    return "❌ Groq API error. Please try again.";
-  }
+  return completion.choices?.[0]?.message?.content?.trim() || "No response.";
 };
