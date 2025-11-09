@@ -16,6 +16,7 @@ const allowedOrigins = [
   // "http://localhost:5500",
   // "http://127.0.0.1:5500",
 ];
+app.use("/reports", express.static(path.join(__dirname, "reports")));
 
 app.use(
   cors({
