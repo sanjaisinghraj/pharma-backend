@@ -1,12 +1,6 @@
 // backend/controllers/queryController.js
 const Query = require("../models/Query");
-const {
-  fetchClinicalTrials,
-  fetchPubMed,
-  fetchPubChem,
-  fetchOpenAlex,
-  fetchUSPatents,
-} = require("../utils/liveConnectors");
+const live = require("../utils/liveConnectors");
 const { generatePDFSummary } = require("../utils/reportGenerator");
 
 exports.run = async (req, res) => {
@@ -14,77 +8,72 @@ exports.run = async (req, res) => {
     const { prompt, agents = [] } = req.body || {};
     if (!prompt) return res.status(400).json({ error: "Prompt is required" });
 
-    // ---- live connectors (best-effort; each wrapped) -----------------
-    const want = (k) => agents.includes(k);
+    const use = new Set((agents || []).map(a => String(a).toLowerCase()));
 
     const raw = {};
     const highlights = [];
 
     // Clinical
-    if (want("clinical")) {
+    if (use.has("clinical")) {
       try {
-        const ct = await fetchClinicalTrials(prompt, 1);
+        const ct = await live.fetchClinicalTrials(prompt, 1);
+        const count = ct?.studies?.length || ct?.meta?.total || 0;
         raw.clinical = ct;
-        const n =
-          (ct?.studies?.length) ||
-          (ct?.meta?.found) ||
-          (ct?.meta?.count) ||
-          0;
-        highlights.push(`Clinical trials found: ${n}`);
+        highlights.push(`Clinical: trials found ${count}`);
       } catch (e) {
-        raw.clinical = { error: e.message || String(e) };
+        raw.clinical = { error: e.message };
         highlights.push("Clinical: error fetching.");
       }
     }
 
     // PubMed
-    if (want("pubmed")) {
+    if (use.has("pubmed")) {
       try {
-        const pm = await fetchPubMed(prompt);
+        const pm = await live.fetchPubMed(prompt);
+        const hits = Number(pm?.count || (pm?.papers?.length || 0));
         raw.pubmed = pm;
-        const n = (pm?.papers && pm.papers.length) || pm?.count || 0;
-        highlights.push(`PubMed hits: ${n}`);
+        highlights.push(`PubMed: hits ${hits}`);
       } catch (e) {
-        raw.pubmed = { error: e.message || String(e) };
+        raw.pubmed = { error: e.message };
         highlights.push("PubMed: error fetching.");
       }
     }
 
     // PubChem
-    if (want("pubchem")) {
+    if (use.has("pubchem")) {
       try {
-        const pc = await fetchPubChem(prompt);
+        const pc = await live.fetchPubChem(prompt);
+        const cids = pc?.cids?.length || 0;
         raw.pubchem = pc;
-        const n = (pc?.cids && pc.cids.length) || 0;
-        highlights.push(`PubChem CIDs resolved: ${n}`);
+        highlights.push(`PubChem CIDs resolved: ${cids}`);
       } catch (e) {
-        raw.pubchem = { error: e.message || String(e) };
+        raw.pubchem = { error: e.message };
         highlights.push("PubChem: error fetching.");
       }
     }
 
     // OpenAlex
-    if (want("openalex")) {
+    if (use.has("openalex")) {
       try {
-        const oa = await fetchOpenAlex(prompt);
+        const oa = await live.fetchOpenAlex(prompt);
+        const works = oa?.meta?.count || oa?.results?.length || 0;
         raw.openalex = oa;
-        const n = oa?.meta?.count || (oa?.results?.length ?? 0);
-        highlights.push(`OpenAlex works: ${n}`);
+        highlights.push(`OpenAlex works: ${works}`);
       } catch (e) {
-        raw.openalex = { error: e.message || String(e) };
+        raw.openalex = { error: e.message };
         highlights.push("OpenAlex: error fetching.");
       }
     }
 
     // Patent (placeholder)
-    if (want("patent")) {
+    if (use.has("patent")) {
       try {
-        const pt = await fetchUSPatents(prompt);
-        raw.patent = pt;
-        if (pt.note) highlights.push(`Patent data: ${pt.note}`);
+        const pa = await live.fetchUSPatents(prompt);
+        raw.patent = pa;
+        if (pa.note) highlights.push("Patent data: " + pa.note);
       } catch (e) {
-        raw.patent = { error: e.message || String(e) };
-        highlights.push("Patents: error fetching.");
+        raw.patent = { error: e.message };
+        highlights.push("Patent: error fetching.");
       }
     }
 
@@ -93,27 +82,25 @@ exports.run = async (req, res) => {
       prompt,
       agents,
       highlights,
-      raw,
+      raw
     };
 
-    // Save query
     const q = await Query.create({
       user: req.user.id,
       prompt,
       agents,
       summary,
-      pdfPath: "",
+      pdfPath: ""
     });
 
-    // Generate PDF and update record
+    // Build a PDF
     let pdfPath = "";
     try {
-      pdfPath = await generatePDFSummary(summary, q._id.toString());
+      pdfPath = await generatePDFSummary(summary, q._id);
       q.pdfPath = pdfPath;
       await q.save();
     } catch (e) {
-      // PDF errors should not break the response
-      pdfPath = "";
+      console.warn("PDF generation failed:", e.message);
     }
 
     res.json({ ok: true, summary, pdfPath });
@@ -126,20 +113,10 @@ exports.run = async (req, res) => {
 exports.history = async (req, res) => {
   try {
     const items = await Query.find({ user: req.user.id })
+      .select("_id prompt pdfPath createdAt")
       .sort({ createdAt: -1 })
-      .limit(100)
-      .lean();
-
-    // Keep it light for the list
-    const trimmed = items.map((x) => ({
-      _id: x._id,
-      prompt: x.prompt,
-      createdAt: x.createdAt,
-      highlights: x.summary?.highlights || [],
-      pdfPath: x.pdfPath || "",
-    }));
-
-    res.json({ items: trimmed });
+      .limit(50);
+    res.json({ items });
   } catch (err) {
     console.error("History error:", err);
     res.status(500).json({ error: "Server error" });
