@@ -1,74 +1,83 @@
 // backend/utils/gptAgent.js
-// Uses OpenAI if OPENAI_API_KEY is set (and USE_OPENAI !== 'false').
-// Falls back to a safe mock on any quota/rate-limit or if key not present.
+// Unified LLM adapter: OpenAI (paid), Groq (free tier), or safe mock.
 
 let openai = null;
+let groq = null;
 
-const wantOpenAI =
-  !!process.env.OPENAI_API_KEY &&
-  String(process.env.USE_OPENAI || "true").toLowerCase() !== "false";
+const hasOpenAI = !!process.env.OPENAI_API_KEY;
+const hasGroq   = !!process.env.GROQ_API_KEY;
 
-if (wantOpenAI) {
+if (hasOpenAI) {
   try {
     const { OpenAI } = require("openai");
     openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   } catch (e) {
-    console.warn(
-      "OpenAI SDK not installed or failed to load. Falling back to mock."
-    );
+    console.warn("OpenAI SDK not installed/loaded, will try Groq or mock:", e.message);
   }
 }
 
-function mockReply(message) {
+if (!openai && hasGroq) {
+  try {
+    const Groq = require("groq-sdk");         // <- add dependency in package.json
+    groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  } catch (e) {
+    console.warn("Groq SDK not installed/loaded, will use mock:", e.message);
+  }
+}
+
+function pleasantFallback(message) {
   return [
-    "🧪 **Mock AI reply** (OpenAI disabled or quota exceeded).",
-    `**You asked:** ${message}`,
-    "",
-    "This is a placeholder response so your workflow keeps running.",
-    "Once you add credit/enabled billing on OpenAI and redeploy, real model outputs will appear here."
+    "🧪 Mock AI reply (no working LLM key).",
+    `You said: "${message}"`,
+    "Add OPENAI_API_KEY (with billing) or GROQ_API_KEY on Render to enable live responses."
   ].join("\n");
 }
 
 module.exports = async function gptAgent({ message, system, user }) {
-  // No SDK or OpenAI intentionally disabled
-  if (!openai) return mockReply(message);
+  const sys = system || "You are a pharma innovation research assistant. Be concise, factual and cite datasets if available.";
+  const userTag = user ? ` (user:${user.email || user.id})` : "";
 
-  const sys =
-    system ||
-    "You are a pharma innovation research assistant. Be concise and factual.";
-  const userLine = user ? ` (user:${user.email || user.id})` : "";
-
-  try {
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-      messages: [
-        { role: "system", content: sys },
-        { role: "user", content: `${message}${userLine}` }
-      ],
-      temperature: 0.2
-    });
-
-    return (
-      completion.choices?.[0]?.message?.content?.trim() ||
-      mockReply(message)
-    );
-  } catch (err) {
-    // Graceful fallback on quota/rate-limit/network issues
-    const code = (err && (err.code || err.status)) || "";
-    const msg = (err && err.message) || "";
-
-    const isQuota =
-      code === 429 ||
-      /insufficient_quota|quota|rate limit/i.test(msg) ||
-      /You exceeded your current quota/i.test(msg);
-
-    if (isQuota) {
-      console.warn("OpenAI quota/rate-limit hit. Returning mock reply.");
-      return mockReply(message);
+  // 1) OpenAI path
+  if (openai) {
+    try {
+      const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+      const out = await openai.chat.completions.create({
+        model,
+        temperature: 0.2,
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: `${message}${userTag}` }
+        ]
+      });
+      return out.choices?.[0]?.message?.content?.trim() || "No response.";
+    } catch (err) {
+      // If quota/billing error, fall through to Groq or mock
+      if (err?.code === "insufficient_quota" || err?.status === 429) {
+        console.warn("OpenAI quota/limit hit; falling back to Groq/mock.");
+      } else {
+        console.error("OpenAI error:", err);
+      }
     }
-
-    console.error("OpenAI error:", err);
-    // Also fallback for any other unexpected errors (keeps app usable)
-    return mockReply(message);
   }
+
+  // 2) Groq path (free tier)
+  if (groq) {
+    try {
+      const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+      const out = await groq.chat.completions.create({
+        model,
+        temperature: 0.2,
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: `${message}${userTag}` }
+        ]
+      });
+      return out.choices?.[0]?.message?.content?.trim() || "No response.";
+    } catch (err) {
+      console.error("Groq error:", err);
+    }
+  }
+
+  // 3) Fallback mock
+  return pleasantFallback(message);
 };
