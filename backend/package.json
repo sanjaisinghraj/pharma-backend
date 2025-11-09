@@ -1,23 +1,18 @@
 {
   "name": "pharma-backend",
   "version": "1.0.0",
-  "description": "PharmaIntel AI backend",
   "main": "server.js",
-  "type": "commonjs",
-  "engines": {
-    "node": ">=18"
-  },
-  "scripts": {
-    "start": "node server.js"
-  },
+  "engines": { "node": ">=18 <=20" },
   "dependencies": {
-    "axios": "^1.7.7",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.18.4",
-    "jsonwebtoken": "^9.0.2",
-    "mongoose": "^7.8.0",
-    "pdfkit": "^0.14.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^7.5.0",
+    "node-fetch": "^2.6.7",
+    "node-cache": "^5.1.2",
+    "pdfkit": "^0.13.0",
     "openai": "^4.30.0"
   }
 }
