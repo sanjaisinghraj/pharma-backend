@@ -1,34 +1,86 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const mongoose = require('mongoose');
-const authRoutes = require('./routes/authRoutes');
-const queryRoutes = require('./routes/queryRoutes');
+// =======================
+// SERVER.JS for Render
+// =======================
 
+require("dotenv").config();
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+
+// Create app
 const app = express();
 
+// ------------------------
+// CORS CONFIG (IMPORTANT)
+// ------------------------
 const allowedOrigins = [
-  'https://your-solution.space'
+  "https://your-solution.space",
+  "https://www.your-solution.space"
 ];
 
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Allow server-to-server or non-browser requests
+      if (!origin) return callback(null, true);
 
-app.use(cors());
-app.use(bodyParser.json());
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        console.log("❌ BLOCKED CORS origin:", origin);
+        return callback(new Error("CORS blocked for " + origin), false);
+      }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
+  })
+);
 
+// Preflight
+app.options("*", cors());
+
+// ------------------------
+// BODY PARSER
+// ------------------------
+app.use(express.json());
+
+// ------------------------
+// MONGO CONNECTION
+// ------------------------
+const MONGO_URI = process.env.MONGO_URI;
+
+mongoose
+  .connect(MONGO_URI, {
+    dbName: "pharmaintel",
+  })
+  .then(() => console.log("✅ MongoDB connected"))
+  .catch((err) => {
+    console.error("❌ MongoDB connection error:", err);
+  });
+
+// ------------------------
+// HEALTH CHECK ROUTE
+// ------------------------
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+// ------------------------
+// LOAD ROUTES
+// ------------------------
+const authRoutes = require("./routes/authRoutes");
+app.use("/api/auth", authRoutes);
+
+const moleculeRoutes = require("./routes/moleculeRoutes");
+app.use("/api/molecule", moleculeRoutes);
+
+// Add more routes as needed...
+
+// ------------------------
+// START SERVER
+// ------------------------
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/pharmaintel';
-
-mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-    .then(()=> console.log('MongoDB connected'))
-    .catch((err)=> console.error('MongoDB connection error:', err));
-
-app.use('/api/auth', authRoutes);
-app.use('/api/query', queryRoutes);
-app.get('/api/health', (req,res)=> res.json({status: 'ok'}));
-
-app.listen(PORT, ()=> console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () =>
+  console.log(`✅ Server running on port ${PORT}`)
+);
