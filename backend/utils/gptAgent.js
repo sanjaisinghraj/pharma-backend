@@ -1,49 +1,38 @@
 // backend/utils/gptAgent.js
+const OpenAI = require("openai");
 
-const axios = require("axios");
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY, // set in Render
+});
+
+const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+// ^ low-cost model; change to 'gpt-4o' if you have access.
 
 /**
- * Generic GPT Agent using ANY OpenAI-compatible API
- * Works with free models from:
- * - Groq
- * - OpenRouter
- * - TogetherAI
- * - DeepSeek
+ * Ask the LLM with short history.
+ * @param {string} prompt
+ * @param {Array<{role:'user'|'assistant', content:string}>} history
  */
-async function gptAgent(prompt) {
-  try {
-    const API_KEY = process.env.LLM_API_KEY;
-    const API_URL = process.env.LLM_API_URL;
-    const MODEL = process.env.LLM_MODEL || "gpt-4o-mini";
+async function askLLM(prompt, history = []) {
+  const messages = [
+    {
+      role: "system",
+      content:
+        "You are PharmaIntel AI, a pharma intelligence assistant. " +
+        "Be concise, cite sources if explicitly provided in context, " +
+        "and never fabricate data.",
+    },
+    ...history.slice(-12), // keep last few exchanges only
+    { role: "user", content: prompt },
+  ];
 
-    if (!API_KEY || !API_URL) {
-      throw new Error("LLM_API_KEY or LLM_API_URL missing");
-    }
+  const resp = await client.chat.completions.create({
+    model: DEFAULT_MODEL,
+    messages,
+    temperature: 0.2,
+  });
 
-    const response = await axios.post(
-      API_URL,
-      {
-        model: MODEL,
-        messages: [
-          { role: "system", content: "You are an expert pharma intelligence assistant." },
-          { role: "user", content: prompt }
-        ]
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${API_KEY}`
-        }
-      }
-    );
-
-    const text = response.data.choices?.[0]?.message?.content || "No response";
-    return text;
-
-  } catch (err) {
-    console.error("GPT Agent Error:", err.response?.data || err.message);
-    return "⚠️ GPT Agent Error: " + (err.response?.data?.error?.message || err.message);
-  }
+  return resp.choices?.[0]?.message?.content?.trim() || "Sorry, no answer.";
 }
 
-module.exports = gptAgent;
+module.exports = { askLLM };
