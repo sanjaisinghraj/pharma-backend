@@ -1,38 +1,39 @@
 // backend/utils/gptAgent.js
-const OpenAI = require("openai");
+// Uses OpenAI if OPENAI_API_KEY is set; otherwise returns a safe mock.
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY, // set in Render
-});
+let openai = null;
+const useOpenAI = !!process.env.OPENAI_API_KEY;
 
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
-// ^ low-cost model; change to 'gpt-4o' if you have access.
+if (useOpenAI) {
+  try {
+    const { OpenAI } = require("openai");
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  } catch (e) {
+    console.warn("OpenAI SDK not installed or failed to load. Falling back to mock.");
+  }
+}
 
-/**
- * Ask the LLM with short history.
- * @param {string} prompt
- * @param {Array<{role:'user'|'assistant', content:string}>} history
- */
-async function askLLM(prompt, history = []) {
-  const messages = [
-    {
-      role: "system",
-      content:
-        "You are PharmaIntel AI, a pharma intelligence assistant. " +
-        "Be concise, cite sources if explicitly provided in context, " +
-        "and never fabricate data.",
-    },
-    ...history.slice(-12), // keep last few exchanges only
-    { role: "user", content: prompt },
-  ];
+module.exports = async function gptAgent({ message, system, user }) {
+  // Fallback mock if no key/OpenAI
+  if (!openai) {
+    return [
+      "🧪 Mock AI reply (no OPENAI_API_KEY).",
+      `You said: "${message}"`,
+      "When you add OPENAI_API_KEY on Render, this will call a GPT model.",
+    ].join("\n");
+  }
 
-  const resp = await client.chat.completions.create({
-    model: DEFAULT_MODEL,
-    messages,
+  const sys = system || "You are a pharma innovation research assistant. Be concise and factual.";
+  const userLine = user ? ` (user:${user.email || user.id})` : "";
+
+  const completion = await openai.chat.completions.create({
+    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: `${message}${userLine}` },
+    ],
     temperature: 0.2,
   });
 
-  return resp.choices?.[0]?.message?.content?.trim() || "Sorry, no answer.";
-}
-
-module.exports = { askLLM };
+  return completion.choices?.[0]?.message?.content?.trim() || "No response.";
+};
