@@ -1,13 +1,10 @@
 // backend/server.js
 require("dotenv").config();
-
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const path = require("path");
-
 const app = express();
-
 /* ---------------- CORS ---------------- */
 const allowedOrigins = [
   "https://your-solution.space",
@@ -16,7 +13,7 @@ const allowedOrigins = [
   // "http://localhost:5500",
   // "http://127.0.0.1:5500",
 ];
-
+app.use("/api/chat", require("./routes/chatRoutes"));
 app.use(
   cors({
     origin(origin, cb) {
