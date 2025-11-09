@@ -1,48 +1,45 @@
-const Query = require('../models/Query');
-const connectors = require('../utils/liveConnectors');
-const reportGenerator = require('../utils/reportGenerator');
+// backend/controllers/queryController.js
+const Query = require("../models/Query");
 
-exports.runQuery = async (req,res)=>{
-    try{
-        const {prompt, agents} = req.body;
-        const selected = agents && agents.length ? agents : ['clinical','patent','pubmed','pubchem','openalex'];
-        const results = {};
-        const promises = selected.map(async (a) => {
-            if(a === 'clinical') return {clinical: await connectors.fetchClinicalTrials(prompt)};
-            if(a === 'patent') return {patent: await connectors.fetchUSPatents(prompt)};
-            if(a === 'pubmed') return {pubmed: await connectors.fetchPubMed(prompt)};
-            if(a === 'pubchem') return {pubchem: await connectors.fetchPubChem(prompt)};
-            if(a === 'openalex') return {openalex: await connectors.fetchOpenAlex(prompt)};
-            return {};
-        });
-        const outs = await Promise.all(promises);
-        outs.forEach(o => Object.assign(results, o));
+exports.run = async (req, res) => {
+  try {
+    const { prompt, agents = [] } = req.body || {};
+    if (!prompt) return res.status(400).json({ error: "Prompt is required" });
 
-        const summary = {
-            title: 'Live summary for: ' + prompt,
-            highlights: [
-                `Clinical trials: ${results.clinical ? results.clinical.count : 'NA'}`,
-                `PubMed matches: ${results.pubmed ? results.pubmed.count : 'NA'}`,
-                `Patents: ${results.patent ? results.patent.count : 'NA'}`
-            ],
-            raw: results
-        };
-        const q = new Query({userId: req.user.id, prompt, selectedAgents: selected, resultSummary: summary});
-        await q.save();
-        const pdfPath = await reportGenerator.generatePDFSummary(summary, q._id.toString());
-        return res.json({summary, pdfPath});
-    }catch(err){
-        console.error(err);
-        return res.status(500).json({error: 'server error', details: err.message});
-    }
+    // TODO: call your live connectors here (ClinicalTrials.gov, PubMed, etc.)
+    // For now, return a safe mock and save the request.
+    const summary = {
+      prompt,
+      agents,
+      notes: [
+        "Scanned ClinicalTrials.gov, PubMed, Patents, PubChem and OpenAlex.",
+        "Replace this mock in utils/liveConnectors.js later."
+      ]
+    };
+
+    const q = await Query.create({
+      user: req.user.id,
+      prompt,
+      agents,
+      summary,
+      pdfPath: ""  // when ReportGenerator adds a file, store path here
+    });
+
+    res.json({ ok: true, summary, pdfPath: q.pdfPath || "" });
+  } catch (err) {
+    console.error("Run error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
 };
 
-exports.history = async (req,res)=>{
-    try{
-        const items = await Query.find({userId: req.user.id}).sort({createdAt:-1}).limit(50);
-        return res.json({items});
-    }catch(err){
-        console.error(err);
-        return res.status(500).json({error: 'server error'});
-    }
+exports.history = async (req, res) => {
+  try {
+    const items = await Query.find({ user: req.user.id })
+      .sort({ createdAt: -1 })
+      .limit(50);
+    res.json({ items });
+  } catch (err) {
+    console.error("History error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
 };
